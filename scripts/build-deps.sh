@@ -26,7 +26,7 @@ echo "[1/3] Building WebKit for iOS..."
 cd "$DEPS_DIR"
 
 if [ ! -d "WebKit" ]; then
-    git clone https://github.com/ArtSabintsev/WebKit.git
+    git clone --depth 1 https://github.com/WebKit/WebKit.git
 fi
 
 cd WebKit
