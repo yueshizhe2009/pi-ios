@@ -174,6 +174,24 @@ cp "$DEPS_DIR/WebKit/build-ios-device/lib/"*.a build/ios-webkit-device/lib/
 cp "$DEPS_DIR/WebKit/Source/JavaScriptCore/API/"*.h build/ios-webkit-device/include/
 cp "$DEPS_DIR/WebKit/build-ios-device/cmakeconfig.h" build/ios-webkit-device/include/
 
+# The ios-port branch currently provides only an iOS Simulator toolchain.
+# Generate the matching device toolchain expected by this build script.
+cat > "$DEPS_DIR/bun/cmake/toolchains/ios-device.cmake" <<'CMAKE'
+set(CMAKE_SYSTEM_NAME iOS)
+set(CMAKE_SYSTEM_PROCESSOR arm64)
+set(CMAKE_OSX_SYSROOT iphoneos)
+set(CMAKE_OSX_ARCHITECTURES arm64)
+set(CMAKE_OSX_DEPLOYMENT_TARGET 16.0)
+set(CMAKE_C_COMPILER_TARGET arm64-apple-ios16.0)
+set(CMAKE_CXX_COMPILER_TARGET arm64-apple-ios16.0)
+execute_process(
+    COMMAND xcrun --sdk iphoneos --show-sdk-path
+    OUTPUT_VARIABLE IOS_SDK_PATH
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+)
+set(ENV{IOS_SYSROOT} "${IOS_SDK_PATH}")
+CMAKE
+
 mkdir -p build/ios-device && cd build/ios-device
 
 cmake ../.. \
