@@ -45,7 +45,24 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          bash scripts/build-deps.sh
+          bash scripts/build-deps.sh 2>&1 | tee build-deps.log
+
+      # 调试辅助：把失败原因写进公开 annotation，这样不登录也能看到报错。
+      # 构建转绿后可以整段删掉。
+      - name: Surface build-deps failure
+        if: failure()
+        shell: bash
+        run: |
+          LOG=build-deps.log
+          if [ ! -s "$LOG" ]; then
+            echo "::error::build-deps.sh 没有产生日志输出"
+            exit 0
+          fi
+          echo "::error::---- 关键错误行 ----"
+          grep -nE "error:|Error|FAILED|fatal|No such file|not found|undefined|command not found|CMake Error" "$LOG" \
+            | tail -12 | sed 's/%/%25/g; s/\r//g' | while IFS= read -r l; do echo "::error::$l"; done
+          echo "::error::---- 日志结尾 12 行 ----"
+          tail -12 "$LOG" | sed 's/%/%25/g; s/\r//g' | while IFS= read -r l; do echo "::error::tail | $l"; done
 
       - name: Build Pi JavaScript bundle
         shell: bash
