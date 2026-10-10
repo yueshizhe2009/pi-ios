@@ -1,0 +1,103 @@
+name: Build Pi iOS IPA
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/build-ipa.yml"
+      - "app/**"
+      - "scripts/**"
+      - "README.md"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-pi-ios-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    # Native WebKit/JSC, Bun and Ghostty dependencies are expensive to compile.
+    runs-on: macos-15
+    timeout-minutes: 350
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: |
+          xcodebuild -version
+          xcode-select -p
+
+      - name: Install build tools
+        run: |
+          brew update
+          brew install cmake ninja zig xcodegen
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Build native iOS dependencies
+        shell: bash
+        run: |
+          set -euxo pipefail
+          bash scripts/build-deps.sh
+
+      - name: Build Pi JavaScript bundle
+        shell: bash
+        run: |
+          set -euxo pipefail
+          mkdir -p .ci
+          cat > .ci/pi-entry.ts <<'EOF'
+          export * from "@mariozechner/pi-coding-agent";
+          export { getModel, getModels, getProviders } from "@mariozechner/pi-ai/models";
+          export { InteractiveMode } from "@mariozechner/pi-tui/interactive-mode";
+          export { Container, TUI } from "@mariozechner/pi-tui";
+          EOF
+          bun install -g @mariozechner/pi-coding-agent
+          bun build .ci/pi-entry.ts --outfile app/Pi/Resources/pi-ios-bundle.js --target=bun --minify
+          test -s app/Pi/Resources/pi-ios-bundle.js
+
+      - name: Generate Xcode project
+        working-directory: app
+        run: xcodegen generate
+
+      - name: Build unsigned iOS app
+        shell: bash
+        run: |
+          set -euxo pipefail
+          xcodebuild \
+            -project app/Pi.xcodeproj \
+            -scheme Pi \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build/DerivedData \
+            CODE_SIGNING_ALLOWED=NO \
+            build | tee build/xcodebuild.log
+
+      - name: Package unsigned IPA
+        shell: bash
+        run: |
+          set -euxo pipefail
+          APP_PATH="build/DerivedData/Build/Products/Release-iphoneos/Pi.app"
+          test -d "$APP_PATH"
+          mkdir -p build/ipa/Payload
+          cp -R "$APP_PATH" build/ipa/Payload/Pi.app
+          (cd build/ipa && zip -qry ../Pi-iOS-unsigned.ipa Payload)
+          ls -lh build/Pi-iOS-unsigned.ipa
+
+      - name: Upload IPA and build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pi-ios-build-${{ github.run_number }}
+          path: |
+            build/Pi-iOS-unsigned.ipa
+            build/xcodebuild.log
+          if-no-files-found: warn
+          retention-days: 14
