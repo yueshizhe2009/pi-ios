@@ -206,26 +206,30 @@ cmake ../.. \
     -DCMAKE_TOOLCHAIN_FILE=../../cmake/toolchains/ios-device.cmake
 
 # Bun 默认下载预编译 WebKit（WEBKIT_LOCAL 未开），其 FastJITPermissions.h 在
-# iOS 真机上会调用 pthread_jit_write_protect_supported_np() / pthread_jit_write_protect_np()，
-# 而 iPhoneOS SDK 把这两个符号标记为 unavailable（仅 macOS 与模拟器可用）：
+# ARM64+Darwin 上无条件走 pthread 分支（该分支在 oven-sh/WebKit 里写作
+# `#elif CPU(ARM64)`，没有上游那样的 USE() 守卫），于是 iOS 真机调用
+# pthread_jit_write_protect_supported_np() / pthread_jit_write_protect_np()，
+# 而 iPhoneOS SDK 把这两个符号标记为 unavailable：
 #   FastJITPermissions.h:105:18: error: 'pthread_jit_write_protect_supported_np' is unavailable
-# 本构建 ENABLE_JIT=OFF，落回 WebKit 自带的安全分支即可
-# （threadSelfRestrictSupported→false，threadSelfRestrict→no-op）。
+# 本构建 ENABLE_JIT=OFF，改为在 iOS 上落回 WebKit 自带的安全分支
+# （threadSelfRestrictSupported→false；restrict 只在 supported 为真时才会被调用）。
 WEBKIT_HDR=$(find "$PWD/cache" -path "*/webkit-*/include/JavaScriptCore/FastJITPermissions.h" 2>/dev/null | head -1)
 if [ -n "$WEBKIT_HDR" ]; then
   python3 - "$WEBKIT_HDR" <<'PY'
 import pathlib, sys
 p = pathlib.Path(sys.argv[1])
 s = p.read_text()
-old = "#elif USE(PTHREAD_JIT_PERMISSIONS_API)"
-new = "#elif USE(PTHREAD_JIT_PERMISSIONS_API) && !PLATFORM(IOS_FAMILY)"
+old = "#elif CPU(ARM64)"
+new = "#elif CPU(ARM64) && !PLATFORM(IOS_FAMILY)"
 if new in s:
     print(f"already patched: {p}")
-elif old in s:
+elif s.count(old) == 1:
     p.write_text(s.replace(old, new, 1))
     print(f"patched: {p}")
 else:
-    raise SystemExit(f"expected pthread branch not found in {p}; refusing to guess")
+    hits = [f"{i}: {l}" for i, l in enumerate(s.splitlines(), 1)
+            if "CPU(ARM64)" in l or "JIT_PERMISSIONS" in l]
+    raise SystemExit(f"未找到唯一的 '{old}'（命中 {s.count(old)} 次）。候选行:\n" + "\n".join(hits))
 PY
 else
   echo "警告：没找到 FastJITPermissions.h，跳过 iOS JIT 权限补丁" >&2
