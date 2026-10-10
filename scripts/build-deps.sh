@@ -205,14 +205,18 @@ cmake ../.. \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_TOOLCHAIN_FILE=../../cmake/toolchains/ios-device.cmake
 
-# Bun 默认下载预编译 WebKit（WEBKIT_LOCAL 未开），其 FastJITPermissions.h 在
-# ARM64+Darwin 上无条件走 pthread 分支（该分支在 oven-sh/WebKit 里写作
-# `#elif CPU(ARM64)`，没有上游那样的 USE() 守卫），于是 iOS 真机调用
-# pthread_jit_write_protect_supported_np() / pthread_jit_write_protect_np()，
-# 而 iPhoneOS SDK 把这两个符号标记为 unavailable：
+# Bun 的 SetupWebKit.cmake 只认 linux/macos/windows（`elseif(APPLE) set(WEBKIT_OS
+# "macos")`），iOS 也走 APPLE 分支 —— 于是给 iOS 构建时下载并使用 **macOS** 的
+# WebKit 包（oven-sh/WebKit 的 release 里没有 iOS 资产）。该包按 macOS 配置：
+#   - 不含 USE(PTHREAD_JIT_PERMISSIONS_API) 那样的 USE() 守卫，写作无条件的
+#     `#elif CPU(ARM64)`；
+#   - 其 wtf/Platform.h 里 PLATFORM(IOS_FAMILY) 为 0，所以不能用平台宏做条件。
+# 而 ARM64 分支调用 pthread_jit_write_protect_{supported_,}np()，iPhoneOS SDK
+# 把这两个符号标记为 unavailable：
 #   FastJITPermissions.h:105:18: error: 'pthread_jit_write_protect_supported_np' is unavailable
-# 本构建 ENABLE_JIT=OFF，改为在 iOS 上落回 WebKit 自带的安全分支
-# （threadSelfRestrictSupported→false；restrict 只在 supported 为真时才会被调用）。
+# 本构建 ENABLE_JIT=OFF，直接落回 WebKit 自带的安全分支
+# （threadSelfRestrictSupported→false；restrict 仅在 supported 为真时才被调用）。
+# 注：这里只能用「永不定义」的宏，不能依赖 PLATFORM()/TARGET_OS_* 之类平台宏。
 WEBKIT_HDR=$(find "$PWD/cache" -path "*/webkit-*/include/JavaScriptCore/FastJITPermissions.h" 2>/dev/null | head -1)
 if [ -n "$WEBKIT_HDR" ]; then
   python3 - "$WEBKIT_HDR" <<'PY'
@@ -220,7 +224,7 @@ import pathlib, sys
 p = pathlib.Path(sys.argv[1])
 s = p.read_text()
 old = "#elif CPU(ARM64)"
-new = "#elif CPU(ARM64) && !PLATFORM(IOS_FAMILY)"
+new = "#elif CPU(ARM64) && defined(PI_ENABLE_PTHREAD_JIT_PERMISSIONS) // 见 build-deps.sh"
 if new in s:
     print(f"already patched: {p}")
 elif s.count(old) == 1:
