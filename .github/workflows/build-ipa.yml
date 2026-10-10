@@ -52,13 +52,16 @@ jobs:
         run: |
           set -euxo pipefail
           mkdir -p .ci
+          cat > .ci/package.json <<'EOF'
+          { "private": true, "dependencies": { "@mariozechner/pi-coding-agent": "latest" } }
+          EOF
           cat > .ci/pi-entry.ts <<'EOF'
           export * from "@mariozechner/pi-coding-agent";
           export { getModel, getModels, getProviders } from "@mariozechner/pi-ai/models";
           export { InteractiveMode } from "@mariozechner/pi-tui/interactive-mode";
           export { Container, TUI } from "@mariozechner/pi-tui";
           EOF
-          bun install -g @mariozechner/pi-coding-agent
+          (cd .ci && bun install)
           bun build .ci/pi-entry.ts --outfile app/Pi/Resources/pi-ios-bundle.js --target=bun --minify
           test -s app/Pi/Resources/pi-ios-bundle.js
 
