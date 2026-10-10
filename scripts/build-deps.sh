@@ -205,6 +205,32 @@ cmake ../.. \
     -DCMAKE_BUILD_TYPE=Release \
     -DCMAKE_TOOLCHAIN_FILE=../../cmake/toolchains/ios-device.cmake
 
+# Bun 默认下载预编译 WebKit（WEBKIT_LOCAL 未开），其 FastJITPermissions.h 在
+# iOS 真机上会调用 pthread_jit_write_protect_supported_np() / pthread_jit_write_protect_np()，
+# 而 iPhoneOS SDK 把这两个符号标记为 unavailable（仅 macOS 与模拟器可用）：
+#   FastJITPermissions.h:105:18: error: 'pthread_jit_write_protect_supported_np' is unavailable
+# 本构建 ENABLE_JIT=OFF，落回 WebKit 自带的安全分支即可
+# （threadSelfRestrictSupported→false，threadSelfRestrict→no-op）。
+WEBKIT_HDR=$(find "$PWD/cache" -path "*/webkit-*/include/JavaScriptCore/FastJITPermissions.h" 2>/dev/null | head -1)
+if [ -n "$WEBKIT_HDR" ]; then
+  python3 - "$WEBKIT_HDR" <<'PY'
+import pathlib, sys
+p = pathlib.Path(sys.argv[1])
+s = p.read_text()
+old = "#elif USE(PTHREAD_JIT_PERMISSIONS_API)"
+new = "#elif USE(PTHREAD_JIT_PERMISSIONS_API) && !PLATFORM(IOS_FAMILY)"
+if new in s:
+    print(f"already patched: {p}")
+elif old in s:
+    p.write_text(s.replace(old, new, 1))
+    print(f"patched: {p}")
+else:
+    raise SystemExit(f"expected pthread branch not found in {p}; refusing to guess")
+PY
+else
+  echo "警告：没找到 FastJITPermissions.h，跳过 iOS JIT 权限补丁" >&2
+fi
+
 ninja
 
 echo "Bun built successfully!"
