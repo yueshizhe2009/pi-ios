@@ -108,7 +108,7 @@ set_source_files_properties(
 )
 """
 if "OSLogPrintStream.mm" not in s or "-fobjc-arc" not in s:
-    s = s.rstrip() + "\\n" + arc_patch
+    s = s.rstrip() + "\n" + arc_patch
 
 p.write_text(s)
 print("Patched JSCOnly CMake for iOS Mach exceptions and Objective-C ARC.")
