@@ -192,6 +192,12 @@ execute_process(
 set(ENV{IOS_SYSROOT} "${IOS_SDK_PATH}")
 CMAKE
 
+# Bun 的 CMake configure 会 file(STRINGS) 读取 cmake/sources/*.txt，而这些清单
+# 是由 cmake/Sources.json 经 scripts/glob-sources.mjs 生成的（正常由 scripts/build.mjs
+# 调用）。ios-port 分支没有把它们提交进仓库，且 glob 是相对进程 CWD 扫描的 ——
+# 所以必须在这里、以 Bun 仓库根为 CWD 用 bun 跑一次。
+bun scripts/glob-sources.mjs
+
 mkdir -p build/ios-device && cd build/ios-device
 
 cmake ../.. \
