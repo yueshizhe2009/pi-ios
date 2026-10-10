@@ -111,7 +111,22 @@ if "OSLogPrintStream.mm" not in s or "-fobjc-arc" not in s:
     s = s.rstrip() + "\n" + arc_patch
 
 p.write_text(s)
-print("Patched JSCOnly CMake for iOS Mach exceptions and Objective-C ARC.")
+
+# Current WebKit main has a macOS-specific memoryFootprint(task) call in this
+# source while the iOS/JSCOnly configuration exposes only memoryFootprint().
+# Memory pressure monitoring is not needed for this standalone JSC build; make
+# the Cocoa implementation return 0 for this metric to keep the iOS target buildable.
+footprint = Path("Source/WTF/wtf/cocoa/MemoryFootprintCocoa.cpp")
+fs = footprint.read_text()
+old_call = "    return memoryFootprint(mach_task_self());"
+new_call = "    return 0; // Not used by the standalone iOS JSC-only build.\n"
+if old_call in fs:
+    fs = fs.replace(old_call, new_call, 1)
+    footprint.write_text(fs)
+elif "return 0; // Not used by the standalone iOS JSC-only build." not in fs:
+    raise SystemExit("Expected iOS-incompatible memoryFootprint call was not found; refusing to patch unexpected source.")
+
+print("Patched JSCOnly CMake and iOS-specific WebKit source compatibility.")
 PY
 
 rm -rf build-ios-device
