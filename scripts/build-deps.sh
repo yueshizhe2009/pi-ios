@@ -30,6 +30,78 @@ if [ ! -d "WebKit" ]; then
 fi
 
 cd WebKit
+
+# The upstream JSCOnly CMake file unconditionally generates macOS Mach-exception
+# glue on every Apple platform. The iOS SDK does not ship mach/mach_exc.defs,
+# and the app disables JIT, so skip that macOS-only generated source on iOS.
+python3 - <<'PY'
+from pathlib import Path
+
+p = Path("Source/WTF/wtf/PlatformJSCOnly.cmake")
+s = p.read_text()
+
+old = """elseif (APPLE)
+    file(COPY mac/MachExceptions.defs DESTINATION ${WTF_DERIVED_SOURCES_DIR})
+    add_custom_command(
+        OUTPUT
+            ${WTF_DERIVED_SOURCES_DIR}/MachExceptionsServer.h
+            ${WTF_DERIVED_SOURCES_DIR}/mach_exc.h
+            ${WTF_DERIVED_SOURCES_DIR}/mach_excServer.c
+            ${WTF_DERIVED_SOURCES_DIR}/mach_excUser.c
+        MAIN_DEPENDENCY mac/MachExceptions.defs
+        WORKING_DIRECTORY ${WTF_DERIVED_SOURCES_DIR}
+        COMMAND ${Mig_EXECUTABLE} -header mach_exc.h -user mach_excUser.c
+            -sheader MachExceptionsServer.h -server mach_excServer.c
+            -DMACH_EXC_SERVER_TASKIDTOKEN_STATE -isysroot ${CMAKE_OSX_SYSROOT}
+            MachExceptions.defs
+        VERBATIM)
+    if (NOT USE_GLIB)
+"""
+new = """elseif (APPLE)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+        file(COPY mac/MachExceptions.defs DESTINATION ${WTF_DERIVED_SOURCES_DIR})
+        add_custom_command(
+            OUTPUT
+                ${WTF_DERIVED_SOURCES_DIR}/MachExceptionsServer.h
+                ${WTF_DERIVED_SOURCES_DIR}/mach_exc.h
+                ${WTF_DERIVED_SOURCES_DIR}/mach_excServer.c
+                ${WTF_DERIVED_SOURCES_DIR}/mach_excUser.c
+            MAIN_DEPENDENCY mac/MachExceptions.defs
+            WORKING_DIRECTORY ${WTF_DERIVED_SOURCES_DIR}
+            COMMAND ${Mig_EXECUTABLE} -header mach_exc.h -user mach_excUser.c
+                -sheader MachExceptionsServer.h -server mach_excServer.c
+                -DMACH_EXC_SERVER_TASKIDTOKEN_STATE -isysroot ${CMAKE_OSX_SYSROOT}
+                MachExceptions.defs
+            VERBATIM)
+    endif ()
+    if (NOT USE_GLIB)
+"""
+if old not in s:
+    raise SystemExit("Expected Mach-exception CMake block was not found; refusing to patch unexpected source.")
+s = s.replace(old, new, 1)
+
+old_sources = """        generic/MemoryPressureHandlerGeneric.cpp
+
+        ${WTF_DERIVED_SOURCES_DIR}/mach_excServer.c
+        ${WTF_DERIVED_SOURCES_DIR}/mach_excUser.c
+    )
+"""
+new_sources = """        generic/MemoryPressureHandlerGeneric.cpp
+    )
+    if (CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+        list(APPEND WTF_SOURCES
+            ${WTF_DERIVED_SOURCES_DIR}/mach_excServer.c
+            ${WTF_DERIVED_SOURCES_DIR}/mach_excUser.c
+        )
+    endif ()
+"""
+if old_sources not in s:
+    raise SystemExit("Expected Mach-exception source list was not found; refusing to patch unexpected source.")
+s = s.replace(old_sources, new_sources, 1)
+p.write_text(s)
+print("Patched JSCOnly CMake to skip macOS-only Mach exception glue for iOS.")
+PY
+
 rm -rf build-ios-device
 mkdir build-ios-device && cd build-ios-device
 
