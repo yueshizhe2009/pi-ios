@@ -98,8 +98,20 @@ new_sources = """        generic/MemoryPressureHandlerGeneric.cpp
 if old_sources not in s:
     raise SystemExit("Expected Mach-exception source list was not found; refusing to patch unexpected source.")
 s = s.replace(old_sources, new_sources, 1)
+# The upstream JSCOnly target compiles this Objective-C++ file without ARC,
+# but OSLogPrintStream.mm explicitly requires ARC. Enable ARC for this file only.
+arc_patch = """
+# iOS JSC-only build: OSLogPrintStream.mm uses Objective-C ARC.
+set_source_files_properties(
+    "${CMAKE_SOURCE_DIR}/Source/WTF/wtf/darwin/OSLogPrintStream.mm"
+    PROPERTIES COMPILE_FLAGS "-fobjc-arc"
+)
+"""
+if "OSLogPrintStream.mm" not in s or "-fobjc-arc" not in s:
+    s = s.rstrip() + "\\n" + arc_patch
+
 p.write_text(s)
-print("Patched JSCOnly CMake to skip macOS-only Mach exception glue for iOS.")
+print("Patched JSCOnly CMake for iOS Mach exceptions and Objective-C ARC.")
 PY
 
 rm -rf build-ios-device
