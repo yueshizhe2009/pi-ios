@@ -169,7 +169,9 @@ cd bun
 # Copy WebKit libs
 mkdir -p build/ios-webkit-device/lib build/ios-webkit-device/include
 cp "$DEPS_DIR/WebKit/build-ios-device/lib/"*.a build/ios-webkit-device/lib/
-cp -r "$DEPS_DIR/WebKit/build-ios-device/JavaScriptCore/Headers/"* build/ios-webkit-device/include/
+# WebKit's JSCOnly CMake build does not generate the Xcode-style Headers directory.
+# Export the public JavaScriptCore C API headers directly from the source tree.
+cp "$DEPS_DIR/WebKit/Source/JavaScriptCore/API/"*.h build/ios-webkit-device/include/
 cp "$DEPS_DIR/WebKit/build-ios-device/cmakeconfig.h" build/ios-webkit-device/include/
 
 mkdir -p build/ios-device && cd build/ios-device
